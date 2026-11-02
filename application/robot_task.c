@@ -222,6 +222,8 @@ static void StartMotorTestTask(void const *argument)
     static uint8_t encoder_negative[USB_ENCODER_MOTOR_COUNT];
     static uint32_t encoder_magnitude[USB_ENCODER_MOTOR_COUNT];
     static uint8_t encoder_sequence = 0U;
+    static uint8_t query_index = 0U;  /* 下一次查询的位置反馈下标。 */
+    static uint32_t loop_counter = 0U; /* 电机任务循环计数。 */
 
     ZdtPosition position = {0};
     (void)argument;
@@ -253,52 +255,55 @@ static void StartMotorTestTask(void const *argument)
         for (uint8_t i = 0U; i < CAR_MOTOR_COUNT; ++i)
         {
             motor_target_rpm[i] = chassis_rpm[i];
-    }
+        }
 
-    /* 后面保留原来的四电机控制和位置读取代码。 */
-
-        for (uint8_t i = 0U; i < 4U; ++i)
+        /* 每轮都给四台电机下发最新速度，保证控制刷新及时。 */
+        for (uint8_t i = 0U; i < CAR_MOTOR_COUNT; ++i)
         {
-            /* 先更新这台电机的使能状态和转速。 */
             UpdateMotorControl(i);
-
-            /* 再查询位置，沿用已经验证过的 DMA 收发接口。 */
-            if (ZdtMotorReadPosition(motor_addresses[i], &position))
-            {
-                motor_feedback[i].position_negative = position.negative;
-                motor_feedback[i].position_raw = position.magnitude;
-                motor_feedback[i].position_deg = position.position_deg;
-                motor_feedback[i].last_update_ms = HAL_GetTick();
-                motor_feedback[i].read_ok_count++;
-                motor_feedback[i].last_read_ok = 1U;
-            }
-            else
-            {
-                /* 保留上一次有效位置，同时记录本次失败。 */
-                motor_feedback[i].read_fail_count++;
-                motor_feedback[i].last_read_ok = 0U;
-            }
-
-            osDelay(5);
         }
 
-        /* 按左前、右前、右后、左后的顺序复制最新有效位置。 */
-        for (uint8_t i = 0U; i < USB_ENCODER_MOTOR_COUNT; ++i)
+        /* 每轮只查询一台电机，四轮轮流更新位置反馈。 */
+        if (ZdtMotorReadPosition(motor_addresses[query_index], &position))
         {
-            encoder_negative[i] = motor_feedback[i].position_negative;
-            encoder_magnitude[i] = motor_feedback[i].position_raw;
+            motor_feedback[query_index].position_negative = position.negative;
+            motor_feedback[query_index].position_raw = position.magnitude;
+            motor_feedback[query_index].position_deg = position.position_deg;
+            motor_feedback[query_index].last_update_ms = HAL_GetTick();
+            motor_feedback[query_index].read_ok_count++;
+            motor_feedback[query_index].last_read_ok = 1U;
+        }
+        else
+        {
+            /* 保留上一次有效位置，同时记录本次失败。 */
+            motor_feedback[query_index].read_fail_count++;
+            motor_feedback[query_index].last_read_ok = 0U;
         }
 
-        /* 每轮发送一帧；CDC 忙时跳过本次，不阻塞电机通信。 */
-        UsbProtocolBuildEncoderFrame(
-            encoder_sequence++,
-            encoder_negative,
-            encoder_magnitude,
-            encoder_frame);
-        (void)CDC_Transmit_FS(encoder_frame, sizeof(encoder_frame));
+        query_index = (uint8_t)((query_index + 1U) % CAR_MOTOR_COUNT);
 
-        /* 当前先沿用原反馈采集节奏，后续按底盘响应要求调整。 */
-        osDelay(100);
+        /* 每 5 轮发送一次编码器反馈，避免降低电机控制刷新率。 */
+        ++loop_counter;
+        if ((loop_counter % 5U) == 0U)
+        {
+            /* 按左前、右前、右后、左后的顺序复制最新有效位置。 */
+            for (uint8_t i = 0U; i < USB_ENCODER_MOTOR_COUNT; ++i)
+            {
+                encoder_negative[i] = motor_feedback[i].position_negative;
+                encoder_magnitude[i] = motor_feedback[i].position_raw;
+            }
+
+            /* CDC 忙时跳过本次反馈，不阻塞电机通信。 */
+            UsbProtocolBuildEncoderFrame(
+                encoder_sequence++,
+                encoder_negative,
+                encoder_magnitude,
+                encoder_frame);
+            (void)CDC_Transmit_FS(encoder_frame, sizeof(encoder_frame));
+        }
+
+        /* 串口事务已等待应答完成，任务只保留很短的调度间隔。 */
+        osDelay(2);
     }
 }
 
