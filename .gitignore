@@ -1,0 +1,6 @@
+build
+mx.scratch
+!.settings
+.agents/
+.settings/
+.vscode/
