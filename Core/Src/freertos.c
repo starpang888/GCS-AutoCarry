@@ -25,7 +25,6 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-/* 自定义应用任务与状态接口。 */
 #include "robot_task.h"
 /* USER CODE END Includes */
 
@@ -83,11 +82,7 @@ void vApplicationGetIdleTaskMemory( StaticTask_t **ppxIdleTaskTCBBuffer, StackTy
   */
 void MX_FREERTOS_Init(void) {
   /* USER CODE BEGIN Init */
-  /* 调度器启动前创建状态灯任务及队列，创建失败则进入错误处理。 */
-  if (!RobotTasksInit())
-  {
-    Error_Handler();
-  }
+
   /* USER CODE END Init */
 
   /* USER CODE BEGIN RTOS_MUTEX */
@@ -112,8 +107,7 @@ void MX_FREERTOS_Init(void) {
   defaultTaskHandle = osThreadCreate(osThread(defaultTask), NULL);
 
   /* USER CODE BEGIN RTOS_THREADS */
-  /* 默认任务负责 USB 初始化，必须检查它是否成功创建。 */
-  if (defaultTaskHandle == NULL)
+  if (defaultTaskHandle == NULL || !RobotTaskInit())
   {
     Error_Handler();
   }
@@ -133,10 +127,13 @@ void StartDefaultTask(void const * argument)
   /* init code for USB_DEVICE */
   MX_USB_DEVICE_Init();
   /* USER CODE BEGIN StartDefaultTask */
-  /* USB 外设初始化完成后请求就绪灯效；此时不保证上位机已连接或枚举完成。 */
-  (void)RobotSetStatus(ROBOT_STATUS_READY);
-  /* 初始化工作结束，删除当前默认任务；状态灯由独立任务持续刷新。 */
-  osThreadTerminate(NULL);
+  /* Infinite loop */
+  for(;;)
+  {
+    /* Report progress after this cycle's application work has completed. */
+    RobotTaskHeartbeat();
+    osDelay(1);
+  }
   /* USER CODE END StartDefaultTask */
 }
 

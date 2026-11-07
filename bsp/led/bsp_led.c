@@ -1,29 +1,33 @@
-/* 板级实现：仅在这一层操作 HAL GPIO，供上层灯效模块调用。 */
+/* 状态灯硬件适配：只输出 GPIO 电平，闪烁节奏由任务监测模块决定。 */
 #include "bsp_led.h"
-#include "main.h"
+#include <stddef.h>
 
-/* 板级极性配置：1 表示低电平点亮，0 表示高电平点亮。 */
-#define STATUS_LED_ACTIVE_LOW 1U
-
-void BSPLedInit(void)
+/** @brief 拒绝空资源、多引脚掩码和非法电平。 */
+bool BSPLEDInit(BSPLEDInstance *instance, const BSPLED_Init_Config_s *config)
 {
-    /* GPIO 模式已由 CubeMX 配置，这里只设置初始亮灭状态。 */
-    BSPLedWrite(0U);
+    if (instance == NULL || config == NULL || config->port == NULL ||
+        config->pin == 0U || (config->pin & (config->pin - 1U)) != 0U ||
+        (config->active_level != GPIO_PIN_SET && config->active_level != GPIO_PIN_RESET))
+    {
+        return false;
+    }
+
+    instance->config = *config;
+    instance->initialized = true;
+    BSPLEDSet(instance, false);
+    return true;
 }
 
-void BSPLedWrite(uint8_t on)
+/** @brief 按 active_level 映射亮灭，兼容高有效或低有效状态灯。 */
+void BSPLEDSet(BSPLEDInstance *instance, bool on)
 {
-    GPIO_PinState level;
-
-    /* 将上层的“亮/灭”转换为硬件需要的“低/高”电平。 */
-    if (STATUS_LED_ACTIVE_LOW)
+    if (instance != NULL && instance->initialized)
     {
-        level = on ? GPIO_PIN_RESET : GPIO_PIN_SET;
+        GPIO_PinState level = instance->config.active_level;
+        if (!on)
+        {
+            level = (level == GPIO_PIN_SET) ? GPIO_PIN_RESET : GPIO_PIN_SET;
+        }
+        HAL_GPIO_WritePin(instance->config.port, instance->config.pin, level);
     }
-    else
-    {
-        level = on ? GPIO_PIN_SET : GPIO_PIN_RESET;
-    }
-
-    HAL_GPIO_WritePin(STATUS_LED_GPIO_Port, STATUS_LED_Pin, level);
 }

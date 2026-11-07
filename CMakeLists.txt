@@ -44,26 +44,37 @@ target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
 
 # Add sources to executable
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE
-    # 自定义源码：板级 LED 操作、非阻塞灯效模块、应用任务调度。
+    board/board.c
+    board/board_motor.c
+    application/chassis/omni_kinematics.c
+    application/chassis/chassis_control.c
+    application/robot.c
     bsp/led/bsp_led.c
-    modules/status_led/status_led.c
-    application/robot_task.c
     bsp/uart/bsp_uart.c
-    modules/zdt_motor/zdt_motor.c
-    application/chassis/chassis.c
-    modules/usb_protocol/usb_protocol.c
+    bsp/usb/bsp_usb.c
+    modules/host_link/host_protocol.c
+    modules/host_link/vofa_protocol.c
+    modules/motor/emm/emm_bus.c
+    modules/motor/emm/emm_motor.c
+    modules/task_monitor/task_monitor.c
+    system/robot_task.c
+    system/host_service.c
+    application/chassis/chassis_odometry.c
+    application/chassis/chassis_position_control.c
 )
 
 # Add include paths
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
-    # 自定义头文件目录，与上述三层源码对应。
-    bsp/led
-    modules/status_led
-    application
-    bsp/uart
-    modules/zdt_motor
+    board
     application/chassis
-    modules/usb_protocol
+    application
+    bsp/led
+    bsp/uart
+    bsp/usb
+    modules/host_link
+    modules/motor/emm
+    modules/task_monitor
+    system
 )
 
 # Add project symbols (macros)

@@ -1,6 +1,7 @@
-build
+/build/
 mx.scratch
-!.settings
 .agents/
 .settings/
 .vscode/
+__pycache__/
+*.py[cod]
