@@ -54,6 +54,22 @@ int RunHostLinkTests(void)
     HostProtocolReceive(&parser, 0xA5, 32);
     for (unsigned i = 0; i < length; ++i) HostProtocolReceive(&parser, frame[i], 132);
     CHECK(calls == 2 && last.type == HOST_STOP && last.sequence == 7 && parser.count == 0);
+    const uint8_t center_servo[] = {0xA5,0x5A,0x01,0x08,0x02,0x00,0x01,0x00,
+        0x00,0x00,0xDC,0x05,0xDF,0xD1};
+    CHECK(HostProtocolEncode(HOST_SERVO_PULSE, 1, center_servo + 10, 2, frame, 24) == 14);
+    CHECK(!memcmp(frame, center_servo, sizeof(center_servo)));
+    for (unsigned i = 0; i < sizeof(center_servo); ++i)
+        HostProtocolReceive(&parser, center_servo[i], 133);
+    CHECK(calls == 3 && last.type == HOST_SERVO_PULSE && last.sequence == 1 &&
+          last.servo_pulse_us == 1500);
+    const uint8_t gripper_frame[] = {0xA5,0x5A,0x01,0x09,0x02,0x00,0x01,0x00,
+        0x00,0x00,0xDC,0x05,0xFC,0x3A};
+    CHECK(HostProtocolEncode(HOST_GRIPPER_SERVO_PULSE, 1, gripper_frame + 10, 2, frame, 24) == 14);
+    CHECK(!memcmp(frame, gripper_frame, sizeof(gripper_frame)));
+    for (unsigned i = 0; i < sizeof(gripper_frame); ++i)
+        HostProtocolReceive(&parser, gripper_frame[i], 134);
+    CHECK(calls == 4 && last.type == HOST_GRIPPER_SERVO_PULSE &&
+          last.gripper_servo_pulse_us == 1500 && last.servo_pulse_us == 0);
     CHECK(!HostProtocolEncode(HOST_STOP, 0, NULL, 0, frame, 11));
 
     BSPUSBConnected(true);

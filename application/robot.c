@@ -5,6 +5,56 @@
 
 #define ROBOT_POSITION_PERIOD_MS 50U
 
+bool RobotCraneInit(RobotInstance *robot, XMotorInstance *yaw, XMotorInstance *z,
+                    const XMotorMotionProfile profiles[ROBOT_CRANE_AXIS_COUNT])
+{
+    if (robot == NULL || yaw == NULL || z == NULL || yaw == z ||
+        !yaw->initialized || !z->initialized || profiles == NULL ||
+        !XMotorProfileValid(&profiles[0]) || !XMotorProfileValid(&profiles[1])) return false;
+    robot->crane_axes[0] = yaw;
+    robot->crane_axes[1] = z;
+    robot->crane_profiles[0] = profiles[0];
+    robot->crane_profiles[1] = profiles[1];
+    return true;
+}
+
+bool RobotRackServoInit(RobotInstance *robot, ServoInstance *servo)
+{
+    if (robot == NULL || servo == NULL || !servo->initialized) return false;
+    robot->rack_servo = servo;
+    return true;
+}
+
+bool RobotGripperServoInit(RobotInstance *robot, ServoInstance *servo)
+{
+    if (robot == NULL || servo == NULL || !servo->initialized) return false;
+    robot->gripper_servo = servo;
+    return true;
+}
+
+bool RobotCraneIsBusy(const RobotInstance *robot)
+{
+    if (robot == NULL) return false;
+    if (CraneActionIsRunning(&robot->crane_action)) return true;
+    for (size_t i = 0; i < ROBOT_CRANE_AXIS_COUNT; ++i)
+        if (XMotorIsBusy(robot->crane_axes[i])) return true;
+    return false;
+}
+
+void RobotCraneStop(RobotInstance *robot, XMotorFault fault, bool only_busy)
+{
+    if (robot == NULL) return;
+    CraneActionCancel(&robot->crane_action, fault == X_FAULT_LINK ? CRANE_ACTION_LINK : CRANE_ACTION_STOP);
+    for (size_t i = 0; i < ROBOT_CRANE_AXIS_COUNT; ++i)
+        if (!only_busy || XMotorIsBusy(robot->crane_axes[i])) XMotorStop(robot->crane_axes[i], fault);
+}
+
+bool RobotCraneActionInit(RobotInstance *robot, const CraneActionConfig *config)
+{
+    return robot != NULL && CraneActionInit(&robot->crane_action, robot->crane_axes[0],
+        robot->crane_axes[1], robot->rack_servo, robot->gripper_servo, config);
+}
+
 /* 只清除到达判定，不停止、不改变输出速度。 */
 static void ResetArrival(RobotInstance *robot, RobotArrivalState state)
 {
@@ -24,10 +74,7 @@ static void CancelPosition(RobotInstance *robot)
 /* 位置闭环需要知道当前在哪里；检查的是定位输入，不增加主机发帧期限。 */
 static bool PoseReady(const RobotInstance *robot, uint32_t now_ms)
 {
-    const ChassisOdometryInstance *odometry = robot->odometry;
-    return odometry != NULL && odometry->initialized && odometry->has_baseline &&
-        odometry->pose_valid && !odometry->tracking_lost &&
-        (uint32_t)(now_ms - odometry->last_update_ms) < odometry->config.feedback_timeout_ms;
+    return ChassisLocalizationReady(robot->localization, now_ms);
 }
 
 bool RobotInit(RobotInstance *robot, ChassisControlInstance *control)
@@ -41,19 +88,19 @@ bool RobotInit(RobotInstance *robot, ChassisControlInstance *control)
     return true;
 }
 
-bool RobotPositionInit(RobotInstance *robot, ChassisOdometryInstance *odometry,
+bool RobotPositionInit(RobotInstance *robot, ChassisLocalizationFeedback *localization,
                        ChassisPositionControlInstance *position_control,
                        const RobotArrival_Init_Config_s *arrival_config)
 {
-    if (robot == NULL || robot->control == NULL || odometry == NULL ||
-        !odometry->initialized || position_control == NULL || !position_control->initialized ||
-        odometry->config.kinematics != robot->kinematics || arrival_config == NULL ||
+    /* 定位尚未收到第一帧时仍允许组装；真正的位置命令在PoseReady处检查。 */
+    if (robot == NULL || robot->control == NULL || localization == NULL ||
+        position_control == NULL || !position_control->initialized || arrival_config == NULL ||
         !isfinite(arrival_config->linear_speed_m_s) || arrival_config->linear_speed_m_s <= 0.0f ||
         !isfinite(arrival_config->angular_speed_rad_s) || arrival_config->angular_speed_rad_s <= 0.0f ||
         arrival_config->hold_ms == 0U || arrival_config->hold_ms >= 0x80000000U ||
         arrival_config->feedback_timeout_ms == 0U || arrival_config->feedback_timeout_ms >= 0x80000000U ||
         arrival_config->max_sample_span_ms >= arrival_config->feedback_timeout_ms) return false;
-    robot->odometry = odometry;
+    robot->localization = localization;
     robot->position_control = position_control;
     robot->arrival_config = *arrival_config;
     return true;
@@ -73,18 +120,105 @@ void RobotHostCommand(RobotInstance *robot, const HostCommand *command, uint32_t
 
     if (command->type == HOST_STOP)
     {
+        RobotCraneStop(robot, X_FAULT_NONE, false);
         RobotStop(robot, CHASSIS_OK, now_ms);
+        return;
+    }
+
+    if (command->type == HOST_CRANE_DISABLE)
+    {
+        if (command->crane_axis >= ROBOT_CRANE_AXIS_COUNT ||
+            robot->crane_axes[command->crane_axis] == NULL)
+        { ++robot->control->status.rejected_commands; return; }
+        CraneActionCancel(&robot->crane_action, CRANE_ACTION_STOP);
+        XMotorInstance *axis = robot->crane_axes[command->crane_axis];
+        axis->motion.sequence = command->sequence;
+        XMotorDisable(axis);
+        return;
+    }
+
+    if (command->type == HOST_CRANE_PICK || command->type == HOST_CRANE_PLACE)
+    {
+        if (!CraneActionStart(&robot->crane_action,
+            command->type == HOST_CRANE_PICK ? CRANE_ACTION_PICK : CRANE_ACTION_PLACE,
+            robot->crane_profiles, command->sequence, now_ms))
+            ++robot->control->status.rejected_commands;
+        return;
+    }
+
+    if (CraneActionIsRunning(&robot->crane_action))
+    {
+        if (command->type == HOST_CRANE_STOP && command->crane_axis < ROBOT_CRANE_AXIS_COUNT)
+        {
+            RobotCraneStop(robot, X_FAULT_NONE, false);
+            return;
+        }
+        if (command->type == HOST_CRANE_TARGET || command->type == HOST_CRANE_CONFIG ||
+            command->type == HOST_SERVO_PULSE || command->type == HOST_GRIPPER_SERVO_PULSE)
+        {
+            ++robot->control->status.rejected_commands;
+            return;
+        }
+    }
+
+    if (command->type == HOST_SERVO_PULSE)
+    {
+        if (robot->rack_servo == NULL ||
+            !ServoSetPulseUs(robot->rack_servo, command->servo_pulse_us))
+            ++robot->control->status.rejected_commands;
+        return;
+    }
+
+    if (command->type == HOST_GRIPPER_SERVO_PULSE)
+    {
+        if (robot->gripper_servo == NULL ||
+            !ServoSetPulseUs(robot->gripper_servo, command->gripper_servo_pulse_us))
+            ++robot->control->status.rejected_commands;
+        return;
+    }
+
+    if (command->type == HOST_CRANE_TARGET || command->type == HOST_CRANE_CONFIG ||
+        command->type == HOST_CRANE_STOP)
+    {
+        if (command->crane_axis >= ROBOT_CRANE_AXIS_COUNT ||
+            robot->crane_axes[command->crane_axis] == NULL)
+        { ++robot->control->status.rejected_commands; return; }
+        XMotorInstance *axis = robot->crane_axes[command->crane_axis];
+        if (command->crane_reserved != 0U)
+        { ++axis->motion.rejected_commands; return; }
+        if (command->type == HOST_CRANE_STOP)
+        { axis->motion.sequence = command->sequence; XMotorStop(axis, X_FAULT_NONE); }
+        else if (command->type == HOST_CRANE_CONFIG)
+        {
+            XMotorMotionProfile profile = {command->crane_speed_deci_rpm,
+                command->crane_acceleration_rpm_s, command->crane_deceleration_rpm_s};
+            if (!XMotorProfileValid(&profile)) ++axis->motion.rejected_commands;
+            else robot->crane_profiles[command->crane_axis] = profile;
+        }
+        else (void)XMotorSetTarget(axis, command->crane_target_units,
+            &robot->crane_profiles[command->crane_axis], command->sequence, now_ms);
         return;
     }
 
     if (command->type == HOST_POSITION)
     {
-        /* 位置命令须等里程计就绪；停止确认期间的新位置命令需要稍后重发。
+        /* 位置命令须等OPS定位就绪；停止确认期间的新位置命令需要稍后重发。
          * 既有速度命令的等待反馈启动行为保持原样。
          */
         if (robot->position_control == NULL || !PoseReady(robot, now_ms) ||
             robot->control->status.state == CHASSIS_STOPPING)
         {
+            ++robot->control->status.rejected_commands;
+            return;
+        }
+
+        /* OPS失效后已恢复，也必须先取消旧代次目标。
+         * 本条命令不在停止确认之前重新使能；主机随后发新命令才能重新运行。
+         */
+        if (robot->mode == ROBOT_POSITION &&
+            robot->goal_pose_epoch != robot->localization->continuity_epoch)
+        {
+            RobotStop(robot, CHASSIS_NOT_READY, now_ms);
             ++robot->control->status.rejected_commands;
             return;
         }
@@ -97,7 +231,7 @@ void RobotHostCommand(RobotInstance *robot, const HostCommand *command, uint32_t
 
         /* 新位置按绝对坐标覆盖旧目标，不重置里程计，也不追加位移。 */
         if (!ChassisPositionControlCalculate(robot->position_control,
-                                             &robot->odometry->pose, &target) ||
+                                             &robot->localization->pose, &target) ||
             !ChassisControlSetVelocity(robot->control,
                                       &robot->position_control->result.velocity, now_ms))
         {
@@ -122,6 +256,7 @@ void RobotHostCommand(RobotInstance *robot, const HostCommand *command, uint32_t
         robot->position_target_milli[1] = command->target_y_mm;
         robot->position_target_milli[2] = command->target_yaw_mrad;
         robot->target_pose = target;
+        robot->goal_pose_epoch = robot->localization->continuity_epoch;
         robot->mode = ROBOT_POSITION;
         /* 相同目标连续发帧不能推迟50ms更新，否则会饿死到达检测。 */
         if (changed) robot->last_position_update_ms = now_ms;
@@ -215,6 +350,7 @@ static void UpdateArrival(RobotInstance *robot, uint32_t now_ms)
 void RobotUpdate(RobotInstance *robot, uint32_t now_ms)
 {
     if (robot == NULL || robot->control == NULL) return;
+    CraneActionUpdate(&robot->crane_action, now_ms);
 
     if (robot->mode != ROBOT_POSITION)
     {
@@ -222,7 +358,8 @@ void RobotUpdate(RobotInstance *robot, uint32_t now_ms)
         return;
     }
 
-    if (!PoseReady(robot, now_ms))
+    if (!PoseReady(robot, now_ms) ||
+        robot->goal_pose_epoch != robot->localization->continuity_epoch)
     {
         /* fault=7在位置模式下表示定位不可用；取消目标，恢复后须新命令。 */
         RobotStop(robot, CHASSIS_NOT_READY, now_ms);
@@ -245,7 +382,7 @@ void RobotUpdate(RobotInstance *robot, uint32_t now_ms)
     robot->last_position_update_ms = now_ms;
 
     if (!ChassisPositionControlCalculate(robot->position_control,
-                                         &robot->odometry->pose, &robot->target_pose) ||
+                                         &robot->localization->pose, &robot->target_pose) ||
         !ChassisControlSetVelocity(robot->control,
                                   &robot->position_control->result.velocity, now_ms))
     {

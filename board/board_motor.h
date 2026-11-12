@@ -64,7 +64,7 @@ bool BoardChassisOdometryInit(
 bool BoardChassisPositionControlInit(ChassisPositionControlInstance *position_control);
 
 /* 板级集中注入稳定到达阈值，初始化不发送命令、不使能电机。 */
-bool BoardRobotPositionInit(RobotInstance *robot, ChassisOdometryInstance *odometry,
+bool BoardRobotPositionInit(RobotInstance *robot, ChassisLocalizationFeedback *localization,
                             ChassisPositionControlInstance *position_control);
 
 #endif

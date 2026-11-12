@@ -29,13 +29,17 @@ bool ChassisPositionControlInit(
         return false;
     }
 
-    /* 增益和容差都要求为正有限数。 */
+    /* 增益、速度上限和容差都要求为正有限数。 */
     if (!isfinite(config->kp_xy) ||
         !isfinite(config->kp_yaw) ||
+        !isfinite(config->max_linear_m_s) ||
+        !isfinite(config->max_angular_rad_s) ||
         !isfinite(config->position_tolerance_m) ||
         !isfinite(config->yaw_tolerance_rad) ||
         config->kp_xy <= 0.0f ||
         config->kp_yaw <= 0.0f ||
+        config->max_linear_m_s <= 0.0f ||
+        config->max_angular_rad_s <= 0.0f ||
         config->position_tolerance_m <= 0.0f ||
         config->yaw_tolerance_rad <= 0.0f ||
         config->yaw_tolerance_rad >= POSITION_PI)
@@ -171,14 +175,51 @@ bool ChassisPositionControlCalculate(
     }
 
     /*
-     * 本模块不施加速度上限或比例缩放。
-     * 数值溢出则本次计算失败，不输出无效浮点数。
+     * 先检查P控制结果；数值溢出时本次计算失败。
+     * 后面的限幅只处理有效速度，不用限幅掩盖无效浮点数。
      */
     if (!isfinite(result.velocity.vx_m_s) ||
         !isfinite(result.velocity.vy_m_s) ||
         !isfinite(result.velocity.wz_rad_s))
     {
         return false;
+    }
+
+    /*
+     * 第五步：限制平移合速度。
+     *
+     * 例如vx=0.08、vy=0.08m/s，合速度约0.113m/s。
+     * 若最高速度为0.1m/s，两轴同时乘0.1/0.113，
+     * 得到vx≈vy≈0.0707m/s；合速度为0.1m/s且方向不变。
+     *
+     * 没有超限时保留P控制结果，所以接近目标时仍会逐渐减速。
+     */
+    float linear_speed = hypotf(result.velocity.vx_m_s,
+                                result.velocity.vy_m_s);
+    if (!isfinite(linear_speed))
+    {
+        return false;
+    }
+    if (linear_speed > instance->config.max_linear_m_s)
+    {
+        float scale = instance->config.max_linear_m_s / linear_speed;
+        result.velocity.vx_m_s *= scale;
+        result.velocity.vy_m_s *= scale;
+    }
+
+    /*
+     * 第六步：限制角速度大小，保留正负旋转方向。
+     * 平移和旋转分别限幅，不互相挤占对方的速度上限。
+     * 已进入对应容差的输出仍为0，不会被限幅重新启动。
+     */
+    float max_angular = instance->config.max_angular_rad_s;
+    if (result.velocity.wz_rad_s > max_angular)
+    {
+        result.velocity.wz_rad_s = max_angular;
+    }
+    else if (result.velocity.wz_rad_s < -max_angular)
+    {
+        result.velocity.wz_rad_s = -max_angular;
     }
 
     result.within_tolerance = position_ok && yaw_ok;

@@ -2,7 +2,9 @@
 import binascii
 import struct
 
-VELOCITY, ARM, STOP, STATUS = 1, 2, 3, 0x81
+VELOCITY, ARM, STOP, SERVO_PULSE, GRIPPER_SERVO_PULSE, STATUS = 1, 2, 3, 8, 9, 0x81
+CRANE_PICK, CRANE_PLACE, CRANE_ACTION = 0x0A, 0x0B, 0x84
+CRANE_DISABLE = 0x0C
 STATES = ("DISABLED", "ENABLING", "ACTIVE", "STOPPING", "FAULT")
 FAULTS = ("OK", "COMMAND_TIMEOUT", "LINK_LOST", "MOTOR_ERROR", "ENABLE_TIMEOUT",
           "STOP_TIMEOUT", "INVALID_COMMAND", "NOT_READY")
@@ -24,6 +26,18 @@ def velocity(sequence, vx=0.0, vy=0.0, wz=0.0):
     if any(x < -2147483648 or x > 2147483647 for x in values):
         raise ValueError("Velocity exceeds int32 milli-unit wire range")
     return encode(VELOCITY, sequence, struct.pack("<iii", *values))
+
+
+def servo_pulse(sequence, pulse_us):
+    if not 0 <= pulse_us <= 0xFFFF:
+        raise ValueError("Servo pulse must fit uint16 microseconds")
+    return encode(SERVO_PULSE, sequence, struct.pack("<H", pulse_us))
+
+
+def gripper_servo_pulse(sequence, pulse_us):
+    if not 0 <= pulse_us <= 0xFFFF:
+        raise ValueError("Gripper servo pulse must fit uint16 microseconds")
+    return encode(GRIPPER_SERVO_PULSE, sequence, struct.pack("<H", pulse_us))
 
 
 class Parser:

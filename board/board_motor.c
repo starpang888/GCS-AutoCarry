@@ -217,15 +217,19 @@ bool BoardChassisOdometryInit(
 bool BoardChassisPositionControlInit(ChassisPositionControlInstance *position_control)
 {
     const ChassisPositionControl_Init_Config_s config = {
-        .kp_xy = 0.5f,                 /* 0.2m位置误差产生0.1m/s平移速度。 */
-        .kp_yaw = 1.0f,                /* 0.1rad角度误差产生0.1rad/s角速度。 */
-        .position_tolerance_m = 0.005f, /* 当前源码为5mm容差，按平面距离判断；本步保留。 */
-        .yaw_tolerance_rad = 0.0174533f, /* 朝向容差约1度。 */
+    .kp_xy = 0.5f,                 /* 平移P：靠近目标时的速度响应。 */
+    .kp_yaw = 0.5f,                /* 旋转P。 */
+
+    .max_linear_m_s = 0.40f,        /* 平移最高100mm/s。 */
+    .max_angular_rad_s = 0.5f,     /* 旋转最高约28.65度/s。 */
+
+    .position_tolerance_m = 0.005f, /* 距离容差5mm。 */
+    .yaw_tolerance_rad = 0.0174533f, /* 角度容差约1度。 */
     };
     return ChassisPositionControlInit(position_control, &config);
 }
 
-bool BoardRobotPositionInit(RobotInstance *robot, ChassisOdometryInstance *odometry,
+bool BoardRobotPositionInit(RobotInstance *robot, ChassisLocalizationFeedback *localization,
                             ChassisPositionControlInstance *position_control)
 {
     const RobotArrival_Init_Config_s config = {
@@ -235,5 +239,5 @@ bool BoardRobotPositionInit(RobotInstance *robot, ChassisOdometryInstance *odome
         .feedback_timeout_ms = 200U, /* 旧轮速不能用作静稳证据。 */
         .max_sample_span_ms = 80U,   /* 与现有四轮速度反馈时间差约定一致。 */
     };
-    return RobotPositionInit(robot, odometry, position_control, &config);
+    return RobotPositionInit(robot, localization, position_control, &config);
 }

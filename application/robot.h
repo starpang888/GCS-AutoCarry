@@ -2,8 +2,13 @@
 #define ROBOT_H
 
 #include "chassis_control.h"
-#include "chassis_odometry.h"
+#include "chassis_localization.h"
 #include "chassis_position_control.h"
+#include "x_motor.h"
+#include "servo.h"
+#include "crane_action.h"
+
+#define ROBOT_CRANE_AXIS_COUNT 2U
 
 /* 这是运动来源，不是电机使能状态；使能状态仍看底盘控制和真实反馈。 */
 typedef enum
@@ -43,7 +48,8 @@ typedef struct
 {
     ChassisControlInstance *control;
     OmniKinematicsInstance *kinematics;
-    ChassisOdometryInstance *odometry;
+    ChassisLocalizationFeedback *localization; /* 统一定位输入，实际由OPS提供。 */
+    uint32_t goal_pose_epoch; /* 接受当前位置目标时的定位连续性代次。 */
     ChassisPositionControlInstance *position_control;
 
     RobotMode mode;
@@ -57,17 +63,30 @@ typedef struct
     uint32_t arrival_start_sample_ms;
     uint32_t arrival_sample_ms[OMNI_WHEEL_COUNT];
     bool arrival_has_sample;
+    XMotorInstance *crane_axes[ROBOT_CRANE_AXIS_COUNT]; /* 0=yaw，1=z。 */
+    XMotorMotionProfile crane_profiles[ROBOT_CRANE_AXIS_COUNT]; /* 下一条不同目标使用。 */
+    ServoInstance *rack_servo;
+    ServoInstance *gripper_servo;
+    CraneActionInstance crane_action;
 } RobotInstance;
 
 /* 先绑定底盘，再绑定位置控制依赖；所有实例均须长期存活。初始化不产生运动。 */
 bool RobotInit(RobotInstance *robot, ChassisControlInstance *control);
-bool RobotPositionInit(RobotInstance *robot, ChassisOdometryInstance *odometry,
+bool RobotPositionInit(RobotInstance *robot, ChassisLocalizationFeedback *localization,
                        ChassisPositionControlInstance *position_control,
                        const RobotArrival_Init_Config_s *arrival_config);
+bool RobotCraneInit(RobotInstance *robot, XMotorInstance *yaw, XMotorInstance *z,
+                    const XMotorMotionProfile profiles[ROBOT_CRANE_AXIS_COUNT]);
+bool RobotRackServoInit(RobotInstance *robot, ServoInstance *servo);
+bool RobotGripperServoInit(RobotInstance *robot, ServoInstance *servo);
+bool RobotCraneActionInit(RobotInstance *robot, const CraneActionConfig *config);
+void RobotCraneStop(RobotInstance *robot, XMotorFault fault, bool only_busy);
+bool RobotCraneIsBusy(const RobotInstance *robot);
 
-/* 以下入口只由motorTask调用。位置目标只从USB命令进入，不提供手动运动入口。 */
+/* 以下入口只由motorTask调用。USB与可选Debug邮箱复用此命令仲裁，邮箱不直接输出电机。 */
 void RobotHostCommand(RobotInstance *robot, const HostCommand *command, uint32_t now_ms);
-/* STOP/链路异常先取消位置任务，再停止底盘，防止下次更新恢复旧目标。 */
+/* 底盘停止；全局HOST_STOP另由RobotHostCommand取消两轴，
+ * USB链路异常由HostService分别提交底盘/塔吊停止，设备故障保持按机构隔离。 */
 void RobotStop(RobotInstance *robot, ChassisControlFault fault, uint32_t now_ms);
 void RobotUpdate(RobotInstance *robot, uint32_t now_ms);
 

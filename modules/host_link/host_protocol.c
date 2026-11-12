@@ -95,9 +95,13 @@ void HostProtocolReceive(HostProtocolInstance *instance, uint8_t byte, uint32_t 
          */
         bool format =
             ((frame[3] == HOST_VELOCITY ||
-              frame[3] == HOST_POSITION) && length == 12U) ||
+              frame[3] == HOST_POSITION || frame[3] == HOST_CRANE_TARGET ||
+              frame[3] == HOST_CRANE_CONFIG) && length == 12U) ||
+            ((frame[3] == HOST_CRANE_STOP || frame[3] == HOST_CRANE_DISABLE) && length == 1U) ||
+            ((frame[3] == HOST_SERVO_PULSE || frame[3] == HOST_GRIPPER_SERVO_PULSE) && length == 2U) ||
             ((frame[3] == HOST_ARM ||
-              frame[3] == HOST_STOP) && length == 0U);
+              frame[3] == HOST_STOP || frame[3] == HOST_CRANE_PICK ||
+              frame[3] == HOST_CRANE_PLACE) && length == 0U);
 
         if (!format)
         {
@@ -153,6 +157,33 @@ void HostProtocolReceive(HostProtocolInstance *instance, uint8_t byte, uint32_t 
 
             command.target_yaw_mrad =
                 (int32_t)HostGetU32(frame + 18U);
+        }
+
+        if (command.type == HOST_CRANE_TARGET || command.type == HOST_CRANE_CONFIG ||
+            command.type == HOST_CRANE_STOP || command.type == HOST_CRANE_DISABLE)
+        {
+            command.crane_axis = frame[10];
+            if (command.type == HOST_CRANE_TARGET || command.type == HOST_CRANE_CONFIG)
+                command.crane_reserved = (uint32_t)frame[11] | frame[12] | frame[13];
+            if (command.type == HOST_CRANE_TARGET)
+            {
+                uint64_t bits = (uint64_t)HostGetU32(frame + 14U) |
+                    (uint64_t)HostGetU32(frame + 18U) << 32U;
+                command.crane_target_units = (bits >> 63U) ? -(int64_t)(~bits) - 1 : (int64_t)bits;
+            }
+            else if (command.type == HOST_CRANE_CONFIG)
+            {
+                command.crane_speed_deci_rpm = (uint16_t)frame[14] | (uint16_t)frame[15] << 8U;
+                command.crane_acceleration_rpm_s = (uint16_t)frame[16] | (uint16_t)frame[17] << 8U;
+                command.crane_deceleration_rpm_s = (uint16_t)frame[18] | (uint16_t)frame[19] << 8U;
+                command.crane_reserved |= (uint32_t)frame[20] | frame[21];
+            }
+        }
+        else if (command.type == HOST_SERVO_PULSE || command.type == HOST_GRIPPER_SERVO_PULSE)
+        {
+            uint16_t pulse_us = (uint16_t)frame[10] | (uint16_t)frame[11] << 8U;
+            if (command.type == HOST_SERVO_PULSE) command.servo_pulse_us = pulse_us;
+            else command.gripper_servo_pulse_us = pulse_us;
         }
 
         /*

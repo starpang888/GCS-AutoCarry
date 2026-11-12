@@ -46,10 +46,19 @@ target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     board/board.c
     board/board_motor.c
+    board/board_ops.c
+    board/board_crane.c
+    board/board_servo.c
+    board/board_crane_action.c
+    modules/motor/x/x_motor.c
+    modules/ops/ops.c
+    modules/servo/servo.c
     application/chassis/omni_kinematics.c
     application/chassis/chassis_control.c
     application/robot.c
+    application/crane_action.c
     bsp/led/bsp_led.c
+    bsp/pwm/bsp_pwm.c
     bsp/uart/bsp_uart.c
     bsp/usb/bsp_usb.c
     modules/host_link/host_protocol.c
@@ -58,8 +67,10 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     modules/motor/emm/emm_motor.c
     modules/task_monitor/task_monitor.c
     system/robot_task.c
+    system/robot_debug_position.c
     system/host_service.c
     application/chassis/chassis_odometry.c
+    application/chassis/chassis_localization.c
     application/chassis/chassis_position_control.c
 )
 
@@ -69,16 +80,22 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     application/chassis
     application
     bsp/led
+    bsp/pwm
     bsp/uart
     bsp/usb
     modules/host_link
+    modules/ops
+    modules/servo
     modules/motor/emm
+    modules/motor/x
     modules/task_monitor
     system
 )
 
 # Add project symbols (macros)
 target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE
+    # Only Debug builds may contain the optional debugger motion mailbox.
+    $<$<CONFIG:Debug>:ROBOT_DEBUG_BUILD=1>
     # Add user defined symbols
 )
 

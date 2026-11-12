@@ -10,6 +10,7 @@
 | 本交接说明 | `docs/lower-controller-handoff.md` |
 | 公共帧、控制契约及196字节STATUS布局 | `docs/usb-cdc-host-link.md` |
 | 位置目标、64字节POSE及到达条件 | `docs/position-feedback.md` |
+| 塔吊yaw/z的X固件梯形位置与上板验证 | `docs/crane-x-integration.md` |
 | VOFA观测说明 | `docs/vofa-feedback.md` |
 | 发给上位机负责人的协议包 | `dist/stm32_usb_protocol_v1.zip` |
 
@@ -43,7 +44,9 @@ CRC-16/CCITT-FALSE覆盖帧头到payload，poly=0x1021、init=0xFFFF、不反射
 | 0x81 STATUS | STM32→上位机 | 长度196，总帧208字节，名义20Hz；字段见主协议 |
 | 0x82 POSE | STM32→上位机 | 长度64，总帧76字节，名义20Hz；字段见位置扩展 |
 
-共四个控制消息，无文本控制命令；两种二进制反馈交替发送，必须按type和length拆帧，不能假设所有帧都是208字节。STATUS包含主机控制state/fault、最后接受的ARM/VELOCITY/POSITION序号、命令拒绝与总线错误计数、目标/实测底盘速度、四轮原始累计位置/实测轮速/使能/堵转及有效性和MCU时间。没有通用ACK，需依据状态和序号确认执行。STOP不更新接受标记；sequence只回传、不去重，不能只靠标记判断实物已执行。
+2026-11-10增加塔吊控制：`05 CRANE_TARGET`（12字节，axis+保留3字节+int64绝对累计位置）、`06 CRANE_CONFIG`（12字节，分轴速度/加/减速度）、`07 CRANE_STOP`（1字节axis）和`83 CRANE`反馈（116字节载荷/128字节总长）。axis=0 yaw、1 z，位置单位为电机轴0.1°、每圈3600，参数与全部字段见主协议。原全局03 STOP现在同时停止底盘及塔吊：底盘停止失能，塔吊停止保持使能。重复活动目标不重复发FD，换目标覆盖；本次运动固件尚未上板验证。
+
+现共七个控制消息，无文本控制命令；二进制STATUS/POSE交替发送各名义20Hz，塔吊CRANE另占空闲时隙名义20Hz，FireWater不混发CRANE。必须按type和length拆帧，不能假设所有帧都是208字节。STATUS包含主机控制state/fault、最后接受的ARM/VELOCITY/POSITION序号、命令拒绝与总线错误计数、目标/实测底盘速度、四轮原始累计位置/实测轮速/使能/堵转及有效性和MCU时间。没有通用ACK，需依据状态和序号确认执行。底盘STOP不更新接受标记；sequence只回传、不去重，不能只靠标记判断实物已执行。塔吊各轴有独立sequence、generation、目标/实测值、驱动ACK及到达状态，不复用底盘到达字段。
 
 协议示例：
 

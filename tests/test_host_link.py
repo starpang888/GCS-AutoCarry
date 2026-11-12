@@ -4,7 +4,8 @@ import struct
 import sys
 import unittest
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from host_protocol_reference import Parser, encode, velocity, decode_status, ARM, STATUS
+from host_protocol_reference import Parser, encode, velocity, servo_pulse, gripper_servo_pulse, decode_status, ARM, STATUS
+from host_protocol_reference import CRANE_PICK, CRANE_PLACE, CRANE_DISABLE
 
 
 class HostLinkTests(unittest.TestCase):
@@ -34,6 +35,25 @@ class HostLinkTests(unittest.TestCase):
         frames = parser.feed(velocity(0, -2147483.648, 2147483.647, 0))
         self.assertEqual(frames[0][2], struct.pack("<iii", -2147483648, 2147483647, 0))
 
+    def test_servo_pulse_golden_frame(self):
+        golden = bytes.fromhex("a55a0108020001000000dc05dfd1")
+        self.assertEqual(servo_pulse(1, 1500), golden)
+        parser = Parser()
+        self.assertEqual(parser.feed(golden), [(8, 1, struct.pack("<H", 1500))])
+
+    def test_gripper_servo_pulse_golden_frame(self):
+        golden = bytes.fromhex("a55a0109020001000000dc05fc3a")
+        self.assertEqual(gripper_servo_pulse(1, 1500), golden)
+        parser = Parser()
+        self.assertEqual(parser.feed(golden), [(9, 1, struct.pack("<H", 1500))])
+
+    def test_crane_action_event_golden_frames(self):
+        self.assertEqual(encode(CRANE_PICK, 1).hex(), "a55a010a000001000000e6df")
+        self.assertEqual(encode(CRANE_PLACE, 1).hex(), "a55a010b0000010000008767")
+        parser = Parser()
+        self.assertEqual(parser.feed(encode(CRANE_PICK, 1) + encode(CRANE_PLACE, 1)),
+                         [(CRANE_PICK, 1, b""), (CRANE_PLACE, 1, b"")])
+
     def test_status_layout_and_unavailable(self):
         payload = bytearray(196)
         struct.pack_into("<I4B", payload, 0, 1234, 2, 0, 1, 1)
@@ -52,6 +72,14 @@ class HostLinkTests(unittest.TestCase):
         self.assertTrue(status["wheels"][0]["enabled"])
         with self.assertRaises(ValueError):
             decode_status(payload[:-1])
+
+    def test_crane_disable_golden_frames(self):
+        yaw = bytes.fromhex("a55a010c0100010000000038e4")
+        z = bytes.fromhex("a55a010c0100010000000119f4")
+        self.assertEqual(encode(CRANE_DISABLE, 1, b"\x00"), yaw)
+        self.assertEqual(encode(CRANE_DISABLE, 1, b"\x01"), z)
+        self.assertEqual(Parser().feed(yaw + z),
+                         [(CRANE_DISABLE, 1, b"\x00"), (CRANE_DISABLE, 1, b"\x01")])
 
 
 if __name__ == "__main__":

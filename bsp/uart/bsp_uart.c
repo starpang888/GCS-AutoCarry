@@ -2,7 +2,8 @@
 #include "bsp_uart.h"
 #include <string.h>
 
-#define BSP_UART_CAPACITY 2U
+/* UART5底盘、UART4定位、USART6塔吊yaw、USART3塔吊z。 */
+#define BSP_UART_CAPACITY 4U
 static BSPUARTInstance *instances[BSP_UART_CAPACITY];
 
 /** @brief 由 HAL 句柄查找已注册实例，供中断回调分发。 */
@@ -22,10 +23,11 @@ static BSPUARTInstance *FindUART(UART_HandleTypeDef *handle)
 bool BSPUARTInit(BSPUARTInstance *uart, const BSPUART_Init_Config_s *config)
 {
     if (uart == NULL || config == NULL || config->handle == NULL ||
-        config->tx_timeout_ms == 0U || config->handle->hdmarx == NULL ||
-        config->handle->hdmatx == NULL ||
+        config->handle->hdmarx == NULL ||
         config->handle->hdmarx->Init.Mode != DMA_CIRCULAR ||
-        config->handle->hdmatx->Init.Mode != DMA_NORMAL)
+        (!config->receive_only && (config->tx_timeout_ms == 0U ||
+         config->handle->hdmatx == NULL ||
+         config->handle->hdmatx->Init.Mode != DMA_NORMAL)))
     {
         return false;
     }
@@ -140,7 +142,8 @@ bool BSPUARTSend(BSPUARTInstance *uart, const uint8_t *data, size_t length,
                  uint32_t now_ms)
 {
     if (uart == NULL || data == NULL || length == 0U ||
-        length > BSP_UART_TX_SIZE || !uart->running || uart->fault || uart->tx_busy)
+        length > BSP_UART_TX_SIZE || uart->config.receive_only ||
+        !uart->running || uart->fault || uart->tx_busy)
     {
         return false;
     }

@@ -11,9 +11,21 @@
 #define HOST_ARM 2U
 #define HOST_STOP 3U
 #define HOST_POSITION 4U  /* 位置目标：固定坐标系下的绝对X、Y、yaw。 */
+#define HOST_CRANE_TARGET 5U /* axis:u8 reserved:3 target:i64LE，12字节。 */
+#define HOST_CRANE_CONFIG 6U /* axis/reserved:4 speed/acc/dec/reserved:u16LE，12字节。 */
+#define HOST_CRANE_STOP 7U   /* axis:u8，1字节；原STOP停底盘和两轴。 */
+#define HOST_SERVO_PULSE 8U  /* rack servo pulse:u16LE，单位us。 */
+#define HOST_GRIPPER_SERVO_PULSE 9U /* gripper servo pulse:u16LE，单位us。 */
+#define HOST_CRANE_PICK 0x0AU /* 独立夹取事件，无载荷；重复sequence不重复执行。 */
+#define HOST_CRANE_PLACE 0x0BU /* 独立放下事件，无载荷。 */
+#define HOST_CRANE_DISABLE 0x0CU /* axis:u8，显式失能用于手动找点，继续反馈。 */
 #define HOST_STATUS 0x81U
 #define HOST_POSE 0x82U          /* 独立位姿/到达反馈；旧STATUS长度不变。 */
 #define HOST_POSE_PAYLOAD_SIZE 64U
+#define HOST_CRANE 0x83U
+#define HOST_CRANE_PAYLOAD_SIZE 116U
+#define HOST_CRANE_ACTION 0x84U
+#define HOST_CRANE_ACTION_PAYLOAD_SIZE 40U
 
 /**
  * @brief 解析后的上位机命令。
@@ -21,7 +33,10 @@
  * type决定哪些字段有效：
  *   HOST_VELOCITY：读取vx_mm_s、vy_mm_s、wz_mrad_s；
  *   HOST_POSITION：读取target_x_mm、target_y_mm、target_yaw_mrad；
- *   HOST_ARM/STOP：没有载荷。
+ *   HOST_ARM/STOP/CRANE_PICK/CRANE_PLACE：没有载荷。
+ *   HOST_CRANE_TARGET/CONFIG/STOP/DISABLE：读取crane_*，原生驱动位置单位见X模块。
+ *   HOST_SERVO_PULSE：读取servo_pulse_us，应用层按板级脉宽范围校验。
+ *   HOST_GRIPPER_SERVO_PULSE：读取gripper_servo_pulse_us，夹爪舵机脉宽。
  *
  * 这是程序内部结构，不直接作为通信帧发送。
  * 增加成员不会改变已有USB帧格式。
@@ -30,7 +45,7 @@ typedef struct
 {
     uint8_t type;
 
-    /* 上位机标记，允许重复或不递增。 */
+    /* 普通目标可重复；联动事件按动作类型记录最近接受值去重，再执行需换值。 */
     uint32_t sequence;
 
     /* 本帧最后一字节的接收时间，单位ms。 */
@@ -50,13 +65,21 @@ typedef struct
     int32_t target_x_mm;
     int32_t target_y_mm;
     int32_t target_yaw_mrad;
+    int64_t crane_target_units;
+    uint32_t crane_reserved; /* 合并所有保留字节，应用要求0。 */
+    uint16_t crane_speed_deci_rpm;
+    uint16_t crane_acceleration_rpm_s;
+    uint16_t crane_deceleration_rpm_s;
+    uint8_t crane_axis;
+    uint16_t servo_pulse_us;
+    uint16_t gripper_servo_pulse_us;
 } HostCommand;
 
 typedef struct
 {
     void (*command)(void *context, const HostCommand *command);
     void *context;
-    uint8_t bytes[24]; /* 最大输入帧：10 字节头 + 12 字节速度 + 2 字节 CRC。 */
+    uint8_t bytes[24]; /* 最大输入帧：10字节头 + 12字节载荷 + 2字节CRC。 */
     size_t count;
     uint32_t last_byte_ms;
     uint32_t valid_frames;

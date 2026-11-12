@@ -19,6 +19,7 @@ typedef struct
 {
     UART_HandleTypeDef *handle;
     uint32_t tx_timeout_ms; /* DMA 发送完成期限，单位 ms。 */
+    bool receive_only; /* true允许仅RX DMA；默认false保留电机UART原行为。 */
 } BSPUART_Init_Config_s;
 
 typedef struct
@@ -38,7 +39,7 @@ typedef struct
     uint32_t restart_ms;
 } BSPUARTInstance;
 
-/** @brief 注册实例和 HAL 句柄；要求 RX 循环 DMA、TX 普通 DMA。 */
+/** @brief 注册实例和 HAL 句柄；要求RX循环DMA；非receive_only实例还要求TX普通DMA及非零发送期限。 */
 bool BSPUARTInit(BSPUARTInstance *uart, const BSPUART_Init_Config_s *config);
 /** @brief 启动 ReceiveToIdle DMA，并重置接收游标；不允许重复启动。 */
 bool BSPUARTStart(BSPUARTInstance *uart, uint32_t now_ms);

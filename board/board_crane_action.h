@@ -1,0 +1,26 @@
+#ifndef BOARD_CRANE_ACTION_H
+#define BOARD_CRANE_ACTION_H
+
+#include "robot.h"
+
+/* 用户标定坐标；安全z=0已确认。CONFIGURED=0可单独禁用对应动作。
+ * yaw/z是驱动器多圈累计单位（每电机轴圈3600），前后是us。 */
+#define BOARD_CRANE_PICK_CONFIGURED 1
+#define BOARD_CRANE_PLACE_CONFIGURED 1
+#define BOARD_CRANE_ACTION_SAFE_Z_UNITS 0LL
+#define BOARD_CRANE_PICK_YAW_UNITS 153LL
+#define BOARD_CRANE_PICK_Z_UNITS 37121LL
+#define BOARD_CRANE_PICK_RACK_PULSE_US 2400U
+#define BOARD_CRANE_PLACE_YAW_UNITS 2816LL
+#define BOARD_CRANE_PLACE_Z_UNITS 22315LL
+#define BOARD_CRANE_PLACE_RACK_PULSE_US 2400U
+
+/* 初始等待值，需实机整定；不得小于舵机实际动作所需时间。 */
+#define BOARD_CRANE_ACTION_RACK_WAIT_MS 1000U
+#define BOARD_CRANE_ACTION_GRIPPER_WAIT_MS 500U
+/* 保留120秒步骤期限；z当前100 RPM、加减速度各100 RPM/s。 */
+#define BOARD_CRANE_ACTION_STEP_TIMEOUT_MS 120000U
+
+bool BoardCraneActionRobotInit(RobotInstance *robot);
+
+#endif

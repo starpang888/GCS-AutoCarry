@@ -34,6 +34,9 @@ typedef struct
     uint32_t now_ms;
     bool stop_in_batch;
     bool next_pose; /* 二进制每25ms轮流发送STATUS/POSE；发送成功才轮换。 */
+    uint32_t last_crane_tx_ms; /* 塔吊反馈另占空闲USB时隙，名义20Hz。 */
+    uint32_t last_action_tx_ms; /* 联动反馈另占空闲时隙，名义10Hz。 */
+    uint8_t crane_stop_mask; /* 同一接收批次内单轴停止优先于本轴后续目标。 */
 } HostServiceInstance;
 
 /* Construct before USB starts; all service calls owned by motorTask. */
